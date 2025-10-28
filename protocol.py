@@ -12,6 +12,7 @@ class MessageType:
     FETCH = "FETCH"
     PING = "PING"
     DISCOVER = "DISCOVER"
+    BYE = "BYE"
     
     # Server -> Client
     OK = "OK"

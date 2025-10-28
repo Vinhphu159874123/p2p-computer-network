@@ -90,8 +90,10 @@ class Client:
             # Start peer server
             self.peer_server.start()
             
-            # Connect to server
-            self.connect_to_server()
+            # Connect to server - must succeed to continue
+            if not self.connect_to_server():
+                self.peer_server.stop()  # Clean up peer server
+                raise ConnectionError("Failed to connect to server - Server may be offline")
             
             self.running = True
             
@@ -163,6 +165,16 @@ class Client:
     def disconnect_from_server(self):
         """Disconnect from server"""
         if self.server_socket:
+            try:
+                # Send BYE message before disconnecting
+                bye_msg = Protocol.build_message(MessageType.BYE)
+                self.server_socket.send(bye_msg.encode(ENCODING))
+                
+                # Wait for server to process BYE
+                time.sleep(0.5)
+            except:
+                pass
+            
             try:
                 self.server_socket.close()
             except:
