@@ -107,17 +107,27 @@ class Server:
             client_socket: Client socket
             client_address: Client address tuple
         """
+        self.logger.info(f"🔗 New connection from {client_address}")
         hostname = None
         
         try:
             while self.running:
-                # Receive message
-                data = client_socket.recv(BUFFER_SIZE)
-                if not data:
+                # Receive message (blocking)
+                try:
+                    data = client_socket.recv(BUFFER_SIZE)
+                    
+                    if not data:
+                        # Client closed connection gracefully
+                        self.logger.info(f"Client closed connection: {client_address}")
+                        break
+                        
+                    message = data.decode(ENCODING).strip()
+                    self.logger.debug(f"Received from {client_address}: {message}")
+                    
+                except Exception as e:
+                    # Socket error - client disconnected
+                    self.logger.info(f"Client connection error: {e}")
                     break
-                
-                message = data.decode(ENCODING).strip()
-                self.logger.debug(f"Received from {client_address}: {message}")
                 
                 # Parse message
                 msg_type, msg_data = Protocol.parse_message(message)
@@ -129,7 +139,9 @@ class Server:
                 # Handle different message types
                 if msg_type == MessageType.HELLO:
                     response = self._handle_hello(msg_data, client_socket)
-                    hostname = msg_data['hostname']
+                    # Use full hostname with port for tracking
+                    hostname = f"{msg_data['hostname']}:{msg_data['port']}"
+                    self.logger.info(f"✓ Hostname registered: {hostname}")
                 
                 elif msg_type == MessageType.PUBLISH:
                     response = self._handle_publish(msg_data)
@@ -145,6 +157,11 @@ class Server:
                 
                 elif msg_type == MessageType.DISCOVER:
                     response = self._handle_discover(msg_data)
+                
+                elif msg_type == MessageType.BYE:
+                    # Client is disconnecting gracefully
+                    self.logger.info(f"Client {hostname} sent BYE")
+                    break
                 
                 else:
                     response = Protocol.build_message(MessageType.ERROR, "UNKNOWN", "Unknown command")
@@ -162,7 +179,15 @@ class Server:
                 with self.connections_lock:
                     if hostname in self.client_connections:
                         del self.client_connections[hostname]
-                # Note: We don't deregister client here as they might reconnect
+                
+                # Deregister client from index (they need to re-HELLO if reconnecting)
+                result = self.index_manager.deregister_client(hostname)
+                if result:
+                    self.logger.info(f"✓ Client deregistered successfully: {hostname}")
+                else:
+                    self.logger.warning(f"⚠️ Failed to deregister client (not found): {hostname}")
+            else:
+                self.logger.warning(f"⚠️ Connection closed but hostname was None: {client_address}")
             
             try:
                 client_socket.close()
